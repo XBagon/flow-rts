@@ -28,7 +28,10 @@ impl Game {
     ) {
         commands.insert_resource(Game {});
         spawn_head_quarters_ev.send(SpawnHeadQuarters {
-            position: Vec3::new(0.0, 0.0, 0.0),
+            position: Vec3::new(0.0, 0.0, 5.0),
+        });
+        spawn_head_quarters_ev.send(SpawnHeadQuarters {
+            position: Vec3::new(5.0, 0.0, 0.0),
         });
     }
 

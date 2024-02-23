@@ -37,7 +37,7 @@ fn main() {
                 }),
                 ..default()
             }),
-        FrameTimeDiagnosticsPlugin::default(),
+        FrameTimeDiagnosticsPlugin,
         LogDiagnosticsPlugin::default(),
         AssetPlugin,
         GamePlugin,

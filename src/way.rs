@@ -7,16 +7,19 @@ use bevy::{
     },
 };
 
-use crate::input::InputController;
+use crate::{
+    building::Building,
+    input::{InputController, InputEvent},
+};
 
 pub struct WayPlugin;
 
 impl Plugin for WayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, WayController::setup)
-            .add_event::<StartWay>()
-            .add_event::<FinishWay>()
-            .add_systems(Update, (StartWay::handle, FinishWay::handle, PlacingWay::update));
+        app.add_systems(Startup, WayController::setup).add_event::<InteractWay>().add_systems(
+            Update,
+            ((WayController::handle_input, InteractWay::handle).chain(), PlacingWay::update),
+        );
     }
 }
 
@@ -24,7 +27,8 @@ impl Plugin for WayPlugin {
 pub struct WayController {
     pub material: Handle<StandardMaterial>,
     pub mesh: Handle<Mesh>,
-    pub currenty_placing: bool,
+    pub start_building: Option<Entity>,
+    pub connected: Vec<(Entity, Entity)>,
 }
 
 impl WayController {
@@ -51,20 +55,57 @@ impl WayController {
         commands.insert_resource(WayController {
             material: material.clone(),
             mesh: mesh.clone(),
-            currenty_placing: false,
+            start_building: None,
+            connected: Vec::new(),
         });
+    }
+
+    fn handle_input(
+        mut ev_input: EventReader<InputEvent>,
+        mut ev_interact_way: EventWriter<InteractWay>,
+        controller: Res<WayController>,
+    ) {
+        for event in ev_input.read() {
+            match *event {
+                InputEvent::ClickedOnBuilding {
+                    building,
+                } => {
+                    if let Some(start_building) = controller.start_building {
+                        if start_building == building {
+                            continue;
+                        }
+                        ev_interact_way.send(InteractWay::Finish {
+                            connect_to: building,
+                        });
+                    } else {
+                        ev_interact_way.send(InteractWay::Start {
+                            from: building,
+                        });
+                    }
+                }
+                InputEvent::Abort => {
+                    if let Some(start_building) = controller.start_building {
+                        ev_interact_way.send(InteractWay::Abort {
+                            aborted: start_building,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 
 #[derive(Component)]
 pub struct PlacingWay {
-    from: Vec3,
+    from: Entity,
 }
 
 impl PlacingWay {
     pub fn update(
         mut meshes: ResMut<Assets<Mesh>>,
         mut query: Query<(&PlacingWay, &mut Handle<Mesh>)>,
+        q_buildings: Query<&Transform, With<Building>>,
         input_controller: Res<InputController>,
     ) {
         for (way, mesh) in query.iter_mut() {
@@ -77,12 +118,22 @@ impl PlacingWay {
                     return;
                 };
 
-            let Some(global_cursor) = input_controller.plane_position else {
+            let global_end_point = if let Some(hovering_building) =
+                input_controller.hovering_building
+            //.and_then(|hovering_building|
+            {
+                //(hovering_building != way.from).then_some(hovering_building)
+                //}) {
+                let transform = q_buildings.get(hovering_building).unwrap();
+                transform.translation
+            } else if let Some(plane_position) = input_controller.plane_position {
+                plane_position
+            } else {
                 return;
             };
 
             let start_point = Vec3::ZERO;
-            let end_point = global_cursor - way.from;
+            let end_point = global_end_point - q_buildings.get(way.from).unwrap().translation;
             let offset =
                 (end_point - start_point).try_normalize().unwrap_or(Vec3::X).cross(Vec3::Y) * 0.5;
 
@@ -95,64 +146,67 @@ impl PlacingWay {
 }
 
 #[derive(Event)]
-pub struct StartWay {
-    pub from: Vec3,
+pub enum InteractWay {
+    Start {
+        from: Entity,
+    },
+    Finish {
+        connect_to: Entity,
+    },
+    Abort {
+        aborted: Entity,
+    },
 }
 
-impl StartWay {
+impl InteractWay {
     pub fn handle(
         mut commands: Commands,
-        mut events: EventReader<StartWay>,
+        mut events: EventReader<InteractWay>,
         mut controller: ResMut<WayController>,
         mut meshes: ResMut<Assets<Mesh>>,
+        q_ways: Query<Entity, With<PlacingWay>>,
+        q_buildings: Query<&Transform, With<Building>>,
     ) {
-        if controller.currenty_placing {
-            return;
-        }
-        if let Some(event) = events.read().next() {
-            controller.currenty_placing = true;
+        for event in events.read() {
+            match *event {
+                InteractWay::Start {
+                    from,
+                } => {
+                    controller.start_building = Some(from);
 
-            let base_mesh = meshes.get(controller.mesh.id()).unwrap().clone();
-            let mesh = meshes.add(base_mesh);
+                    let base_mesh = meshes.get(controller.mesh.id()).unwrap().clone();
+                    let mesh = meshes.add(base_mesh);
 
-            commands.spawn((
-                PlacingWay {
-                    from: event.from,
-                },
-                PbrBundle {
-                    transform: Transform::from_translation(event.from)
-                        .with_rotation(Quat::from_rotation_x(0.0)),
-                    mesh,
-                    material: controller.material.clone(),
-                    ..default()
-                },
-            ));
-        }
-    }
-}
-
-#[derive(Event)]
-pub struct FinishWay {
-    pub abort: bool,
-}
-
-impl FinishWay {
-    pub fn handle(
-        mut commands: Commands,
-        mut events: EventReader<FinishWay>,
-        mut controller: ResMut<WayController>,
-        query: Query<Entity, With<PlacingWay>>,
-    ) {
-        if !controller.currenty_placing {
-            return;
-        }
-        if let Some(event) = events.read().next() {
-            controller.currenty_placing = false;
-            let entity = query.single();
-            if event.abort {
-                commands.entity(entity).despawn();
-            } else {
-                commands.entity(entity).remove::<PlacingWay>();
+                    commands.spawn((
+                        PlacingWay {
+                            from,
+                        },
+                        PbrBundle {
+                            transform: Transform::from_translation(
+                                q_buildings.get(from).unwrap().translation,
+                            )
+                            .with_rotation(Quat::from_rotation_x(0.0)),
+                            mesh,
+                            material: controller.material.clone(),
+                            ..default()
+                        },
+                    ));
+                }
+                InteractWay::Finish {
+                    connect_to: connected_to,
+                } => {
+                    let entity = q_ways.single();
+                    let start_building = controller.start_building.take().unwrap();
+                    controller.connected.push((start_building, connected_to));
+                    commands.entity(entity).remove::<PlacingWay>();
+                }
+                InteractWay::Abort {
+                    aborted: _,
+                } => {
+                    let entity = q_ways.single();
+                    commands.entity(entity).despawn();
+                    controller.start_building = None;
+                }
             }
         }
     }

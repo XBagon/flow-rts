@@ -1,17 +1,14 @@
 use bevy::prelude::*;
 
-use crate::{
-    building::Building,
-    way::{FinishWay, StartWay, WayController},
-};
+use crate::building::Building;
 
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InputController>()
-            .add_event::<HoveringBuildingChanged>()
-            .add_systems(Update, update);
+            .add_event::<InputEvent>()
+            .add_systems(PreUpdate, update);
     }
 }
 
@@ -24,31 +21,26 @@ pub struct InputController {
 pub fn update(
     mut controller: ResMut<InputController>,
     buttons: Res<ButtonInput<MouseButton>>,
-    way_controller: Res<WayController>,
-    mut start_way_evs: EventWriter<StartWay>,
-    mut finish_way_evs: EventWriter<FinishWay>,
+    mut ev_input: EventWriter<InputEvent>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     q_window: Query<&Window>,
     q_buildings: Query<(Entity, &Transform), With<Building>>,
-    mut hovering_building_ev: EventWriter<HoveringBuildingChanged>,
 ) {
     if buttons.just_pressed(MouseButton::Left) {
-        if way_controller.currenty_placing {
-            finish_way_evs.send(FinishWay {
-                abort: false,
+        if let Some(hovering_building) = controller.hovering_building {
+            ev_input.send(InputEvent::ClickedOnBuilding {
+                building: hovering_building,
             });
-        } else {
-            if let Some(plane_position) = controller.plane_position {
-                start_way_evs.send(StartWay {
-                    from: plane_position,
-                });
-            }
+
+            //if let Some(plane_position) = controller.plane_position {
+            //    start_way_evs.send(StartWay {
+            //        from: plane_position,
+            //    });
+            //}
         }
     }
     if buttons.just_pressed(MouseButton::Right) {
-        finish_way_evs.send(FinishWay {
-            abort: true,
-        });
+        ev_input.send(InputEvent::Abort);
     }
 
     let (camera, camera_transform) = q_camera.single();
@@ -95,9 +87,8 @@ pub fn update(
         let distance_vector = global_cursor - transform.translation;
         if distance_vector.x.abs() < 0.5 && distance_vector.z.abs() < 0.5 {
             if Some(entity) != controller.hovering_building {
-                hovering_building_ev.send(HoveringBuildingChanged {
+                ev_input.send(InputEvent::EnterHoverBuilding {
                     building: entity,
-                    active: true,
                 });
                 controller.hovering_building = Some(entity);
             }
@@ -106,9 +97,8 @@ pub fn update(
     }
 
     if let Some(hovering_building) = controller.hovering_building {
-        hovering_building_ev.send(HoveringBuildingChanged {
+        ev_input.send(InputEvent::ExitHoverBuilding {
             building: hovering_building,
-            active: false,
         });
         controller.hovering_building = None;
     }
@@ -118,4 +108,18 @@ pub fn update(
 pub struct HoveringBuildingChanged {
     pub building: Entity,
     pub active: bool,
+}
+
+#[derive(Event)]
+pub enum InputEvent {
+    ClickedOnBuilding {
+        building: Entity,
+    },
+    EnterHoverBuilding {
+        building: Entity,
+    },
+    ExitHoverBuilding {
+        building: Entity,
+    },
+    Abort,
 }

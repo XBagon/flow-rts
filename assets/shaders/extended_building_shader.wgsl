@@ -43,7 +43,17 @@ fn fragment(
 // #else
      var out: FragmentOutput;
      // apply lighting
-     out.color = apply_pbr_lighting(pbr_input) * (1.0 + f32(building_material.glowing)*((1.0+sin(globals.time*8.0))*0.5));
+
+    var glow_color: vec3<f32>;
+    
+    switch building_material.glowing {
+        case 0u: {glow_color = vec3<f32>(0.0);}
+        case 1u: {glow_color = vec3<f32>(1.0);}
+        case 2u: {glow_color = vec3<f32>(0.0, 1.0, 0.0);}
+        default: {glow_color = vec3<f32>(1.0, 0.0, 1.0);}
+    }
+
+     out.color = apply_pbr_lighting(pbr_input) + vec4<f32>(glow_color*((1.0+sin(globals.time*8.0))*0.1), 0.0);
 
 //     // we can optionally modify the lit color before post-processing is applied
 //     out.color = vec4<f32>(vec4<u32>(out.color * f32(my_extended_material.quantize_steps))) / f32(my_extended_material.quantize_steps);

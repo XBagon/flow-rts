@@ -41,7 +41,7 @@ impl SpawnHeadQuarters {
         for event in spawn_head_quarters.read() {
             commands.spawn((
                 HeadQuarters {},
-                Building {},
+                Building::default(),
                 SceneBundle {
                     scene: head_quaters_spawner.scene.clone(),
                     transform: Transform::from_translation(event.position),
