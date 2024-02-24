@@ -75,6 +75,7 @@ impl WayController {
                             continue;
                         }
                         ev_interact_way.send(InteractWay::Finish {
+                            from: start_building,
                             connect_to: building,
                         });
                     } else {
@@ -151,6 +152,7 @@ pub enum InteractWay {
         from: Entity,
     },
     Finish {
+        from: Entity,
         connect_to: Entity,
     },
     Abort {
@@ -193,6 +195,7 @@ impl InteractWay {
                     ));
                 }
                 InteractWay::Finish {
+                    from,
                     connect_to: connected_to,
                 } => {
                     let entity = q_ways.single();

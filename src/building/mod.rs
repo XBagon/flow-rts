@@ -2,6 +2,7 @@ use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
+use bevy::scene::SceneInstanceReady;
 
 use crate::input::{InputController, InputEvent};
 use crate::way::InteractWay;
@@ -26,7 +27,11 @@ impl Plugin for BuildingPlugin {
             .add_plugins(MaterialPlugin::<BuildingExtendedMaterial>::default())
             .add_systems(
                 Update,
-                (BuildingAssets::on_building_scene_loaded, Building::update_glowing),
+                (
+                    BuildingAssets::on_building_scene_loaded,
+                    BuildingAssets::on_instancing_scene,
+                    Building::update_glowing,
+                ),
             );
     }
 }
@@ -53,12 +58,12 @@ impl BuildingAssets {
     }
 
     pub fn on_building_scene_loaded(
-        mut scene_asset_ev: EventReader<AssetEvent<Scene>>,
+        mut ev_scene_asset: EventReader<AssetEvent<Scene>>,
         mut scenes: ResMut<Assets<Scene>>,
         materials: Res<Assets<StandardMaterial>>,
         mut extended_materials: ResMut<Assets<BuildingExtendedMaterial>>,
     ) {
-        for event in scene_asset_ev.read() {
+        for event in ev_scene_asset.read() {
             if let AssetEvent::LoadedWithDependencies {
                 id,
             } = *event
@@ -89,6 +94,32 @@ impl BuildingAssets {
                         .insert(extended_material)
                         .remove::<Handle<StandardMaterial>>();
                 }
+            }
+        }
+    }
+
+    pub fn on_instancing_scene(
+        mut ev_scene_ready: EventReader<SceneInstanceReady>,
+        q_children: Query<(Entity, &Children)>,
+        mut q_materials: Query<&mut Handle<BuildingExtendedMaterial>>, //or use Added filter?
+        mut materials: ResMut<Assets<BuildingExtendedMaterial>>,
+    ) {
+        for event in ev_scene_ready.read() {
+            dbg!(event);
+            let (_, children) = q_children.get(event.parent).unwrap();
+            //let scene_instance = q_scene_instances.get(*child).unwrap();
+
+            //let scene = scenes.get_mut(scene_instance.).unwrap();
+            let (_, children) = q_children.get(*children.first().unwrap()).unwrap();
+            let (_, children) = q_children.get(*children.first().unwrap()).unwrap();
+
+            let mut material_handles = q_materials.iter_many_mut(children);
+
+            while let Some(mut material_handle) = material_handles.fetch_next() {
+                let material = materials.get_mut(material_handle.id()).unwrap().clone();
+                let new_material = materials.add(material);
+                *material_handle = new_material;
+                dbg!(material_handle.id());
             }
         }
     }
@@ -133,76 +164,72 @@ impl Building {
     pub fn update_glowing(
         mut ev_input: EventReader<InputEvent>,
         mut ev_interact_way: EventReader<InteractWay>,
+        mut q_buildings: Query<&mut Building>,
         q_children: Query<&Children>,
-        mut q_buildings: Query<&Children>,
         mut q_building_primitives: Query<&mut Handle<BuildingExtendedMaterial>>,
         mut materials: ResMut<Assets<BuildingExtendedMaterial>>,
         input_controller: Res<InputController>,
     ) {
-        let mut event_happend = false;
+        let mut modified_buildings = Vec::new();
+
         for event in ev_interact_way.read() {
-            event_happend = true;
-
-            let (building, glowing) = match event {
-                &InteractWay::Start {
+            match *event {
+                InteractWay::Start {
                     from,
-                } => (from, Glowing::Connecting),
-                &InteractWay::Finish {
-                    connect_to: building,
+                } => {
+                    q_buildings.get_mut(from).unwrap().glowing = Glowing::Connecting;
+                    modified_buildings.push(from);
                 }
-                | &InteractWay::Abort {
-                    aborted: building,
-                } => (building, Glowing::Off),
+                InteractWay::Finish {
+                    from,
+                    connect_to,
+                } => {
+                    q_buildings.get_mut(from).unwrap().glowing = Glowing::Off;
+                    modified_buildings.push(from);
+                    q_buildings.get_mut(connect_to).unwrap().glowing = Glowing::Off;
+                    modified_buildings.push(connect_to);
+                }
+                InteractWay::Abort {
+                    aborted,
+                } => {
+                    q_buildings.get_mut(aborted).unwrap().glowing = Glowing::Off;
+                    modified_buildings.push(aborted);
+                }
             };
+        }
 
-            let children = q_buildings.get_mut(building).unwrap();
+        for event in ev_input.read() {
+            if let InputEvent::ExitHoverBuilding {
+                building: entity,
+            } = *event
+            {
+                let mut building = q_buildings.get_mut(entity).unwrap();
+                if building.glowing == Glowing::Hovering {
+                    building.glowing = Glowing::Off;
+                    modified_buildings.push(entity);
+                }
+            }
+        }
+
+        if let Some(entity) = input_controller.hovering_building {
+            let mut building = q_buildings.get_mut(entity).unwrap();
+            if building.glowing == Glowing::Off {
+                building.glowing = Glowing::Hovering;
+                modified_buildings.push(entity);
+            }
+        }
+
+        for entity in modified_buildings {
+            let building = q_buildings.get(entity).unwrap();
+            let children = q_children.get(entity).unwrap();
 
             let children = q_children.get(*children.iter().next().unwrap()).unwrap();
             let children = q_children.get(*children.iter().next().unwrap()).unwrap();
             for child in children.iter() {
                 if let Ok(material) = q_building_primitives.get_mut(*child) {
                     let material = materials.get_mut(material.id()).unwrap();
-                    material.extension.glowing = glowing as u32;
-                }
-            }
-        }
 
-        for event in ev_input.read() {
-            event_happend = true;
-            if let InputEvent::ExitHoverBuilding {
-                building,
-            } = *event
-            {
-                {
-                    let children = q_buildings.get_mut(building).unwrap();
-
-                    let children = q_children.get(*children.iter().next().unwrap()).unwrap();
-                    let children = q_children.get(*children.iter().next().unwrap()).unwrap();
-                    for child in children.iter() {
-                        if let Ok(material) = q_building_primitives.get_mut(*child) {
-                            let material = materials.get_mut(material.id()).unwrap();
-                            if material.extension.glowing != Glowing::Connecting as u32 {
-                                material.extension.glowing = Glowing::Off as u32;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if event_happend {
-            if let Some(hovering_building) = input_controller.hovering_building {
-                let children = q_buildings.get_mut(hovering_building).unwrap();
-
-                let children = q_children.get(*children.iter().next().unwrap()).unwrap();
-                let children = q_children.get(*children.iter().next().unwrap()).unwrap();
-                for child in children.iter() {
-                    if let Ok(material) = q_building_primitives.get_mut(*child) {
-                        let material = materials.get_mut(material.id()).unwrap();
-                        if material.extension.glowing != Glowing::Connecting as u32 {
-                            material.extension.glowing = Glowing::Hovering as u32;
-                        }
-                    }
+                    material.extension.glowing = building.glowing as u32;
                 }
             }
         }
