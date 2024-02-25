@@ -6,6 +6,10 @@ use bevy::{
         render_resource::PrimitiveTopology,
     },
 };
+use bevy_xpbd_3d::plugins::{
+    collision::Collider,
+    spatial_query::{SpatialQuery, SpatialQueryFilter},
+};
 
 use crate::{
     building::Building,
@@ -29,6 +33,7 @@ pub struct WayController {
     pub mesh: Handle<Mesh>,
     pub start_building: Option<Entity>,
     pub connected: Vec<(Entity, Entity)>,
+    pub placing_valid: bool,
 }
 
 impl WayController {
@@ -56,6 +61,7 @@ impl WayController {
             material: material.clone(),
             mesh: mesh.clone(),
             start_building: None,
+            placing_valid: false,
             connected: Vec::new(),
         });
     }
@@ -63,6 +69,7 @@ impl WayController {
     fn handle_input(
         mut ev_input: EventReader<InputEvent>,
         mut ev_interact_way: EventWriter<InteractWay>,
+        q_building: Query<&Building>,
         controller: Res<WayController>,
     ) {
         for event in ev_input.read() {
@@ -71,7 +78,11 @@ impl WayController {
                     building,
                 } => {
                     if let Some(start_building) = controller.start_building {
-                        if start_building == building {
+                        if start_building == building
+                            || !controller.placing_valid
+                            || q_building.get(start_building).unwrap().connected.contains(&building)
+                            || q_building.get(building).unwrap().connected.contains(&start_building)
+                        {
                             continue;
                         }
                         ev_interact_way.send(InteractWay::Finish {
@@ -105,13 +116,21 @@ pub struct PlacingWay {
 impl PlacingWay {
     pub fn update(
         mut meshes: ResMut<Assets<Mesh>>,
-        mut query: Query<(&PlacingWay, &mut Handle<Mesh>)>,
+        mut query: Query<(
+            &PlacingWay,
+            &mut Handle<Mesh>,
+            &mut Handle<StandardMaterial>,
+            &Transform,
+        )>,
         q_buildings: Query<&Transform, With<Building>>,
         input_controller: Res<InputController>,
+        mut way_controller: ResMut<WayController>,
+        spatial_query: SpatialQuery,
+        mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
-        for (way, mesh) in query.iter_mut() {
-            let vertex_positions =
-                meshes.get_mut(mesh.id()).unwrap().attribute_mut(Mesh::ATTRIBUTE_POSITION).unwrap();
+        for (way, mesh, material, transform) in query.iter_mut() {
+            let mesh = meshes.get_mut(mesh.id()).unwrap();
+            let vertex_positions = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION).unwrap();
             let vertex_positions =
                 if let VertexAttributeValues::Float32x3(vertex_positions) = vertex_positions {
                     vertex_positions
@@ -119,19 +138,18 @@ impl PlacingWay {
                     return;
                 };
 
-            let global_end_point = if let Some(hovering_building) =
-                input_controller.hovering_building
-            //.and_then(|hovering_building|
-            {
-                //(hovering_building != way.from).then_some(hovering_building)
-                //}) {
-                let transform = q_buildings.get(hovering_building).unwrap();
-                transform.translation
-            } else if let Some(plane_position) = input_controller.plane_position {
-                plane_position
-            } else {
-                return;
-            };
+            let mut end_connected = false;
+
+            let global_end_point =
+                if let Some(hovering_building) = input_controller.hovering_building {
+                    let transform = q_buildings.get(hovering_building).unwrap();
+                    end_connected = true;
+                    transform.translation
+                } else if let Some(plane_position) = input_controller.plane_position {
+                    plane_position
+                } else {
+                    return;
+                };
 
             let start_point = Vec3::ZERO;
             let end_point = global_end_point - q_buildings.get(way.from).unwrap().translation;
@@ -142,6 +160,23 @@ impl PlacingWay {
             vertex_positions[1] = (start_point - offset).to_array();
             vertex_positions[2] = (end_point - offset).to_array();
             vertex_positions[3] = (end_point + offset).to_array();
+
+            let intersections = spatial_query.shape_intersections(
+                &Collider::trimesh_from_mesh(mesh).unwrap(),
+                transform.translation,
+                Quat::default(),
+                SpatialQueryFilter::default(),
+            );
+
+            dbg!(intersections.len());
+            let material = materials.get_mut(material.id()).unwrap();
+            if end_connected && intersections.len() == 2 {
+                way_controller.placing_valid = true;
+                material.base_color = Color::rgb(0.3, 0.5, 0.3);
+            } else {
+                way_controller.placing_valid = false;
+                material.base_color = Color::rgb(0.8, 0.3, 0.3);
+            }
         }
     }
 }
@@ -166,8 +201,9 @@ impl InteractWay {
         mut events: EventReader<InteractWay>,
         mut controller: ResMut<WayController>,
         mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
         q_ways: Query<Entity, With<PlacingWay>>,
-        q_buildings: Query<&Transform, With<Building>>,
+        mut q_buildings: Query<(&mut Building, &Transform)>,
     ) {
         for event in events.read() {
             match *event {
@@ -185,22 +221,27 @@ impl InteractWay {
                         },
                         PbrBundle {
                             transform: Transform::from_translation(
-                                q_buildings.get(from).unwrap().translation,
+                                q_buildings.get(from).unwrap().1.translation,
                             )
                             .with_rotation(Quat::from_rotation_x(0.0)),
                             mesh,
-                            material: controller.material.clone(),
+                            material: {
+                                let material =
+                                    materials.get(controller.material.id()).unwrap().clone();
+                                materials.add(material)
+                            },
                             ..default()
                         },
                     ));
                 }
                 InteractWay::Finish {
-                    from,
                     connect_to: connected_to,
+                    ..
                 } => {
                     let entity = q_ways.single();
                     let start_building = controller.start_building.take().unwrap();
                     controller.connected.push((start_building, connected_to));
+                    q_buildings.get_mut(start_building).unwrap().0.connected.push(connected_to);
                     commands.entity(entity).remove::<PlacingWay>();
                 }
                 InteractWay::Abort {

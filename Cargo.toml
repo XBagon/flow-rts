@@ -7,6 +7,9 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.13.0", features = ["dynamic_linking"] }
+bevy_dev_console = { git = "https://github.com/doonv/bevy_dev_console.git", version = "0.1.0" }
+bevy_xpbd_3d = "0.4"
+
 
 [profile.dev]
 opt-level = 1

@@ -3,6 +3,8 @@
 use assets::AssetPlugin;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    gizmos::GizmoPlugin,
+    log::LogPlugin,
     prelude::*,
     render::{
         camera::ScalingMode,
@@ -10,17 +12,20 @@ use bevy::{
         RenderPlugin,
     },
 };
+use bevy_dev_console::prelude::*;
 use game::GamePlugin;
 
 mod assets;
 mod building;
 mod game;
 mod input;
+mod unit;
 mod way;
 
 fn main() {
     let mut app = App::new();
     app.add_plugins((
+        ConsoleLogPlugin::default(),
         DefaultPlugins
             .set(RenderPlugin {
                 render_creation: WgpuSettings {
@@ -36,7 +41,9 @@ fn main() {
                     ..default()
                 }),
                 ..default()
-            }),
+            })
+            .disable::<LogPlugin>(),
+        DevConsolePlugin,
         FrameTimeDiagnosticsPlugin,
         LogDiagnosticsPlugin::default(),
         AssetPlugin,

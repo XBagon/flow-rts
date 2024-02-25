@@ -149,6 +149,7 @@ pub struct CustomizeMaterial {}
 #[derive(Component, Debug, Default)]
 pub struct Building {
     pub glowing: Glowing,
+    pub connected: Vec<Entity>,
 }
 
 #[repr(u8)]
