@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_xpbd_3d::plugins::collision::{Collider, ColliderAabb};
+use bevy_xpbd_3d::plugins::collision::Collider;
 
 use crate::unit::{SpawnUnit, Unit};
 
@@ -24,7 +24,7 @@ pub struct HeadQuartersSpawner {
 
 impl HeadQuartersSpawner {
     pub fn setup(mut commands: Commands, asset_server: ResMut<AssetServer>) {
-        let scene = asset_server.load("models\\towerRound_sampleF.glb#Scene0");
+        let scene = asset_server.load("models/towerRound_sampleF.glb#Scene0");
 
         commands.insert_resource(HeadQuartersSpawner {
             scene,

@@ -15,7 +15,7 @@ pub struct AssetController {
 
 impl AssetController {
     pub fn setup(mut commands: Commands, asset_server: ResMut<AssetServer>) {
-        let scene = asset_server.load("models\\towerRound_sampleF.glb#Scene0");
+        let scene = asset_server.load("models/towerRound_sampleF.glb#Scene0");
 
         commands.insert_resource(AssetController {
             head_quarters_scene: scene,

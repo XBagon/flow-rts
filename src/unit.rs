@@ -6,6 +6,7 @@ pub struct UnitPlugin;
 impl Plugin for UnitPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<SpawnUnit>()
+            .add_event::<UnitArrived>()
             .add_systems(Startup, UnitSpawner::setup)
             .add_systems(PreUpdate, SpawnUnit::handle)
             .add_systems(Update, Unit::update);
@@ -19,7 +20,7 @@ pub struct UnitSpawner {
 
 impl UnitSpawner {
     pub fn setup(mut commands: Commands, asset_server: ResMut<AssetServer>) {
-        let scene = asset_server.load("models\\unit.glb#Scene0");
+        let scene = asset_server.load("models/unit.glb#Scene0");
 
         commands.insert_resource(UnitSpawner {
             scene,
@@ -73,6 +74,7 @@ impl Unit {
         time: Res<Time>,
         mut q_units: Query<(Entity, &Unit, &mut Transform), Without<Building>>,
         q_buildings: Query<&Transform, With<Building>>,
+        mut ev_unit_arrived: EventWriter<UnitArrived>,
     ) {
         for (entity, unit, mut transform) in q_units.iter_mut() {
             let to_building = q_buildings.get(unit.to_building).unwrap();
@@ -84,8 +86,16 @@ impl Unit {
             if distance > movement.length() {
                 transform.translation += movement;
             } else {
+                ev_unit_arrived.send(UnitArrived {
+                    building: unit.to_building,
+                });
                 commands.entity(entity).despawn();
             }
         }
     }
+}
+
+#[derive(Event)]
+pub struct UnitArrived {
+    pub building: Entity,
 }

@@ -22,7 +22,7 @@ impl Plugin for WayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, WayController::setup).add_event::<InteractWay>().add_systems(
             Update,
-            ((WayController::handle_input, InteractWay::handle).chain(), PlacingWay::update),
+            (WayController::handle_input, InteractWay::handle, PlacingWay::update).chain(),
         );
     }
 }
@@ -122,7 +122,7 @@ impl PlacingWay {
             &mut Handle<StandardMaterial>,
             &Transform,
         )>,
-        q_buildings: Query<&Transform, With<Building>>,
+        q_buildings: Query<(&Building, &Transform)>,
         input_controller: Res<InputController>,
         mut way_controller: ResMut<WayController>,
         spatial_query: SpatialQuery,
@@ -138,12 +138,13 @@ impl PlacingWay {
                     return;
                 };
 
-            let mut end_connected = false;
+            let mut end_building = None;
 
             let global_end_point =
                 if let Some(hovering_building) = input_controller.hovering_building {
-                    let transform = q_buildings.get(hovering_building).unwrap();
-                    end_connected = true;
+                    let (_, transform): (&Building, &Transform) =
+                        q_buildings.get(hovering_building).unwrap();
+                    end_building = Some(hovering_building);
                     transform.translation
                 } else if let Some(plane_position) = input_controller.plane_position {
                     plane_position
@@ -152,7 +153,7 @@ impl PlacingWay {
                 };
 
             let start_point = Vec3::ZERO;
-            let end_point = global_end_point - q_buildings.get(way.from).unwrap().translation;
+            let end_point = global_end_point - q_buildings.get(way.from).unwrap().1.translation;
             let offset =
                 (end_point - start_point).try_normalize().unwrap_or(Vec3::X).cross(Vec3::Y) * 0.5;
 
@@ -168,9 +169,13 @@ impl PlacingWay {
                 SpatialQueryFilter::default(),
             );
 
-            dbg!(intersections.len());
             let material = materials.get_mut(material.id()).unwrap();
-            if end_connected && intersections.len() == 2 {
+
+            if end_building.is_some_and(|end_building| {
+                intersections.len() == 2
+                    && !q_buildings.get(way.from).unwrap().0.connected.contains(&end_building)
+                    && !q_buildings.get(end_building).unwrap().0.connected.contains(&way.from)
+            }) {
                 way_controller.placing_valid = true;
                 material.base_color = Color::rgb(0.3, 0.5, 0.3);
             } else {
@@ -196,14 +201,16 @@ pub enum InteractWay {
 }
 
 impl InteractWay {
+    const PLACEMENT_HEIGHT: f32 = 0.001;
+
     pub fn handle(
         mut commands: Commands,
         mut events: EventReader<InteractWay>,
         mut controller: ResMut<WayController>,
         mut meshes: ResMut<Assets<Mesh>>,
         mut materials: ResMut<Assets<StandardMaterial>>,
-        q_ways: Query<Entity, With<PlacingWay>>,
-        mut q_buildings: Query<(&mut Building, &Transform)>,
+        mut q_ways: Query<(Entity, &mut Transform), With<PlacingWay>>,
+        mut q_buildings: Query<(&mut Building, &Transform), Without<PlacingWay>>,
     ) {
         for event in events.read() {
             match *event {
@@ -221,7 +228,8 @@ impl InteractWay {
                         },
                         PbrBundle {
                             transform: Transform::from_translation(
-                                q_buildings.get(from).unwrap().1.translation,
+                                q_buildings.get(from).unwrap().1.translation
+                                    + Vec3::Y * Self::PLACEMENT_HEIGHT,
                             )
                             .with_rotation(Quat::from_rotation_x(0.0)),
                             mesh,
@@ -238,16 +246,18 @@ impl InteractWay {
                     connect_to: connected_to,
                     ..
                 } => {
-                    let entity = q_ways.single();
+                    let (entity, mut transform) = q_ways.single_mut();
                     let start_building = controller.start_building.take().unwrap();
                     controller.connected.push((start_building, connected_to));
-                    q_buildings.get_mut(start_building).unwrap().0.connected.push(connected_to);
+                    let (mut building, _) = q_buildings.get_mut(start_building).unwrap();
+                    building.connected.push(connected_to);
+                    transform.translation.y -= Self::PLACEMENT_HEIGHT;
                     commands.entity(entity).remove::<PlacingWay>();
                 }
                 InteractWay::Abort {
                     aborted: _,
                 } => {
-                    let entity = q_ways.single();
+                    let entity = q_ways.single().0;
                     commands.entity(entity).despawn();
                     controller.start_building = None;
                 }

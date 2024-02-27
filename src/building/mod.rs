@@ -8,14 +8,19 @@ use crate::input::{InputController, InputEvent};
 use crate::way::InteractWay;
 
 use self::headquarters::HeadQuartersPlugin;
+use self::tree::TreePlugin;
 
 pub mod headquarters;
+pub mod tree;
 
 pub struct BuildingPlugins;
 
 impl PluginGroup for BuildingPlugins {
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>().add(BuildingPlugin).add(HeadQuartersPlugin)
+        PluginGroupBuilder::start::<Self>()
+            .add(BuildingPlugin)
+            .add(HeadQuartersPlugin)
+            .add(TreePlugin)
     }
 }
 
@@ -135,11 +140,11 @@ pub struct BuildingMaterialExtension {
 
 impl MaterialExtension for BuildingMaterialExtension {
     fn fragment_shader() -> ShaderRef {
-        "shaders\\extended_building_shader.wgsl".into()
+        "shaders/extended_building_shader.wgsl".into()
     }
 
     fn deferred_fragment_shader() -> ShaderRef {
-        "shaders\\extended_building_shader.wgsl".into()
+        "shaders/extended_building_shader.wgsl".into()
     }
 }
 
